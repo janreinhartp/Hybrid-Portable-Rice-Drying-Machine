@@ -1,0 +1,24 @@
+# ESP-IDF generated output
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.*.old
+managed_components/
+
+# Reference-only project
+Documentation/16_LVGL_UI/
+
+# Python and tooling caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editor and OS metadata
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Generated logs and reports
+*.log
+*.map

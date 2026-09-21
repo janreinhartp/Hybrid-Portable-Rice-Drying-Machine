@@ -1,0 +1,1071 @@
+HMI AND UI FRAMEWORK
+
+Use LVGL as the primary UI framework.
+
+The HMI hardware is:
+
+Waveshare ESP32-S3-Touch-LCD-7B
+
+The firmware must use:
+
+ESP-IDF
+LVGL
+ESP32-S3 display driver
+ESP32-S3 touch driver
+
+Do not use Arduino GUI libraries.
+
+Do not implement the HMI using raw display drawing unless required by the LVGL display integration.
+
+The LVGL application must be separated from the machine-control application.
+
+ARCHITECTURE
+
+Use the following conceptual architecture:
+
+```
+                ┌─────────────────────┐
+                │       LVGL UI       │
+                │                     │
+                │ Home                │
+                │ Drying              │
+                │ Manual              │
+                │ Settings            │
+                │ Calibration         │
+                │ Alarms              │
+                │ History             │
+                │ RTC                 │
+                └──────────┬──────────┘
+                           │
+                     HMI Interface
+                           │
+                ┌──────────▼──────────┐
+                │   Machine State    │
+                │                     │
+                │ Machine Controller  │
+                │ Drying Controller   │
+                │ Safety Controller   │
+                └──────────┬──────────┘
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+          ▼                ▼                ▼
+       Sensors          Actuators        Storage
+          │                │                │
+    Temp/RH/ADC       Relays/SSR       SD/NVS/RTC
+```
+
+The LVGL UI must never directly control GPIO, Modbus relays, motors, heaters, or other hardware.
+
+For example, do NOT allow:
+
+LVGL Button
+↓
+relay_set()
+
+Instead:
+
+LVGL Button
+↓
+HMI command
+↓
+Machine Controller
+↓
+Safety validation
+↓
+Actuator Manager
+↓
+Relay Controller
+
+This keeps safety logic outside the UI.
+
+LVGL VERSION
+
+Use the LVGL version supported by the selected ESP-IDF environment and Waveshare hardware.
+
+Before implementation:
+
+1. Inspect the existing ESP-IDF project.
+2. Identify the installed LVGL version.
+3. Identify the Waveshare display driver.
+4. Identify the touch controller.
+5. Verify the display resolution.
+6. Verify the display orientation.
+7. Verify RGB/parallel/MIPI/SPI interface details from the actual board documentation.
+8. Verify PSRAM configuration.
+9. Verify LVGL memory requirements.
+
+Do not assume the display interface or GPIO mapping.
+
+Use the actual Waveshare documentation and existing project configuration.
+
+LVGL PROJECT STRUCTURE
+
+Use a dedicated UI directory.
+
+Suggested structure:
+
+main/
+hmi/
+hmi_manager.cpp
+hmi_manager.h
+
+```
+    screens/
+        screen_home.cpp
+        screen_home.h
+        screen_drying.cpp
+        screen_drying.h
+        screen_manual.cpp
+        screen_manual.h
+        screen_settings.cpp
+        screen_settings.h
+        screen_calibration.cpp
+        screen_calibration.h
+        screen_alarms.cpp
+        screen_alarms.h
+        screen_history.cpp
+        screen_history.h
+        screen_rtc.cpp
+        screen_rtc.h
+
+    widgets/
+        temperature_widget.cpp
+        temperature_widget.h
+        moisture_widget.cpp
+        moisture_widget.h
+        status_widget.cpp
+        status_widget.h
+        runtime_widget.cpp
+        runtime_widget.h
+        alarm_widget.cpp
+        alarm_widget.h
+
+    styles/
+        ui_theme.cpp
+        ui_theme.h
+
+    assets/
+        ui_assets.h
+
+    hmi_events.cpp
+    hmi_events.h
+    hmi_state.cpp
+    hmi_state.h
+```
+
+Keep individual screens modular.
+
+Do not put the entire UI inside main.cpp.
+
+LVGL TASK
+
+Create a dedicated LVGL task.
+
+Suggested architecture:
+
+lvgl_task
+↓
+LVGL event handling
+↓
+UI updates
+
+The LVGL task owns LVGL operations.
+
+Do not call LVGL functions randomly from multiple FreeRTOS tasks.
+
+LVGL is generally not thread-safe.
+
+If another task needs to update the UI:
+
+sensor_task
+↓
+machine_status
+↓
+HMI state
+↓
+LVGL task
+↓
+UI
+
+Use a queue, event mechanism, shared state with synchronization, or another appropriate mechanism.
+
+Do not allow sensor or machine-control tasks to directly manipulate LVGL objects.
+
+UI UPDATE RATE
+
+Do not update every LVGL object on every sensor reading.
+
+Use an appropriate UI refresh interval.
+
+Suggested starting point:
+
+UI update:
+100 to 250 ms
+
+Sensor acquisition and machine-control rates should remain independent from the UI refresh rate.
+
+Example:
+
+Temperature sensor:
+1 second
+
+Moisture sensor:
+500 ms to 1 second
+
+Machine safety:
+Fast periodic task
+
+LVGL:
+100 to 250 ms
+
+SD logging:
+10 seconds
+
+RTC display:
+1 second
+
+Adjust these values based on actual performance testing.
+
+LVGL SCREEN ARCHITECTURE
+
+Create the following screens.
+
+1. HOME
+
+Display:
+
+Current date
+Current time
+
+Machine state
+
+Upper chamber:
+
+Temperature
+Humidity
+
+Lower chamber:
+
+Temperature
+Humidity
+
+Grain moisture
+
+Actuator status:
+
+Heater
+Fan
+Elevator
+Discharge
+
+SD card status
+
+RTC status
+
+Example layout:
+
+┌──────────────────────────────────────────┐
+│  HYBRID RICE DRYER       21 Sep 2026    │
+│                          10:35:42        │
+├──────────────────────────────────────────┤
+│ UPPER             LOWER                  │
+│ 45.2 °C           43.8 °C                │
+│ 58.2 %RH          61.4 %RH               │
+├──────────────────────────────────────────┤
+│ GRAIN MOISTURE                           │
+│                                          │
+│             16.4 %                       │
+│          TARGET 14.0 %                   │
+├──────────────────────────────────────────┤
+│ HEATER  ON    FAN ON    ELEVATOR OFF     │
+├──────────────────────────────────────────┤
+│             DRYING                       │
+│          01:42:35                        │
+└──────────────────────────────────────────┘
+
+The actual visual design should be implemented using LVGL widgets.
+
+2. DRYING SCREEN
+
+Display:
+
+Current moisture
+Target moisture
+
+Upper temperature
+Lower temperature
+
+Upper humidity
+Lower humidity
+
+Temperature differential
+
+Drying time
+
+Heater state
+
+Fan state
+
+Current machine state
+
+Session ID
+
+Example:
+
+DRYING
+
+Moisture
+16.4 %
+
+Target
+14.0 %
+
+Temperature
+Upper: 45.2 °C
+Lower: 43.8 °C
+
+Humidity
+Upper: 58.2 %
+Lower: 61.4 %
+
+Drying Time
+01:42:35
+
+Session
+DRY-000023
+
+Use graphical LVGL widgets where appropriate.
+
+Possible widgets:
+
+* Arc for moisture
+* Bar for drying progress
+* Labels for sensor readings
+* Status indicators for outputs
+* Timer display
+* Alarm indicators
+
+Do not create misleading progress percentages unless a valid calculation exists.
+
+For example, if only initial and target moisture are known:
+
+progress =
+(initial_moisture - current_moisture)
+/
+(initial_moisture - target_moisture)
+
+Clamp the result to 0 to 100%.
+
+If initial moisture is unavailable, display the current and target values without a fabricated progress percentage.
+
+3. MANUAL CONTROL
+
+Provide controls for:
+
+Elevator
+Fan
+Heater
+Discharge
+
+Example:
+
+ELEVATOR
+[ OFF ] [ ON ]
+
+FAN
+[ OFF ] [ ON ]
+
+HEATER
+[ OFF ] [ ON ]
+
+DISCHARGE
+[ OFF ] [ ON ]
+
+Every button sends an HMI command.
+
+The command goes through the machine controller and safety manager.
+
+The UI must not directly switch a relay.
+
+Show the actual actuator state separately from the requested state.
+
+Example:
+
+Requested:
+ON
+
+Actual:
+OFF
+
+Reason:
+SAFETY INTERLOCK
+
+4. SETTINGS
+
+Provide settings for:
+
+Temperature setpoint
+
+Maximum temperature
+
+Temperature hysteresis
+
+Target moisture
+
+Moisture confirmation time
+
+Drying timeout
+
+Discharge time
+
+Logging interval
+
+Moisture calibration
+
+Modbus addresses
+
+Relay assignments if appropriate
+
+Use LVGL input widgets.
+
+Validate settings before saving.
+
+Do not allow invalid values.
+
+Example:
+
+Temperature Setpoint
+[ 50.0 °C ]
+
+Maximum Temperature
+[ 70.0 °C ]
+
+Hysteresis
+[ 2.0 °C ]
+
+Target Moisture
+[ 14.0 % ]
+
+5. MOISTURE CALIBRATION
+
+Create a dedicated LVGL calibration screen.
+
+Display:
+
+ADC value
+Sensor voltage
+Current calculated moisture
+
+Allow the operator to add calibration points.
+
+Example:
+
+CALIBRATION
+
+Sensor Voltage:
+1.842 V
+
+Measured Rice Moisture:
+[ 18.5 % ]
+
+[ ADD POINT ]
+
+Calibration points:
+
+1.20 V → 25.0 %
+1.55 V → 20.0 %
+1.84 V → 18.5 %
+2.20 V → 15.0 %
+
+[ SAVE CALIBRATION ]
+
+The calibration screen should clearly indicate whether calibration data is saved.
+
+6. RTC SETTINGS
+
+Create a dedicated RTC screen.
+
+Display:
+
+Current RTC date
+Current RTC time
+RTC status
+
+Controls:
+
+Date
+[ 2026-09-21 ]
+
+Time
+[ 10:35:42 ]
+
+[ SET RTC ]
+
+After setting:
+
+Read the RTC again.
+
+Display the verified RTC value.
+
+If the RTC is invalid:
+
+RTC STATUS
+INVALID
+
+Do not silently display a fabricated time.
+
+7. ALARMS
+
+Create an alarm screen.
+
+Display active faults.
+
+Example:
+
+ALARMS
+
+HIGH TEMPERATURE
+Upper chamber: 72.4 °C
+
+MOISTURE SENSOR
+Invalid ADC reading
+
+MODBUS
+Relay communication timeout
+
+RTC
+RTC time invalid
+
+Each alarm should have:
+
+* Fault ID
+* Description
+* Timestamp
+* Current status
+
+Use RTC timestamps.
+
+Use visual severity indicators.
+
+Do not rely solely on color.
+
+The UI should remain understandable if color rendering changes.
+
+8. DRYING HISTORY
+
+Create a historical session browser.
+
+Display a list of drying sessions.
+
+Example:
+
+DRYING HISTORY
+
+DRY-000023
+21 Sep 2026
+01:42:35
+16.4 → 14.0 %
+COMPLETED
+
+DRY-000022
+20 Sep 2026
+02:05:18
+18.2 → 14.1 %
+COMPLETED
+
+DRY-000021
+20 Sep 2026
+00:48:12
+23.1 → 17.5 %
+INTERRUPTED
+
+Selecting a session opens:
+
+SESSION DETAILS
+
+Session:
+DRY-000023
+
+Start:
+21 Sep 2026 08:53:07
+
+End:
+21 Sep 2026 10:35:42
+
+Duration:
+01:42:35
+
+Initial Moisture:
+16.4 %
+
+Final Moisture:
+14.0 %
+
+Target:
+14.0 %
+
+Max Upper Temp:
+52.4 °C
+
+Max Lower Temp:
+50.8 °C
+
+Heater Runtime:
+01:18:21
+
+Fan Runtime:
+01:42:35
+
+Status:
+COMPLETED
+
+The UI should retrieve only the required portion of the history.
+
+Do not load all CSV files into memory.
+
+9. SD CARD STATUS
+
+Display:
+
+SD CARD
+
+Status:
+READY
+
+Capacity:
+4 GB
+
+Used:
+1.2 GB
+
+Free:
+2.8 GB
+
+If the SD card is unavailable:
+
+Status:
+NOT AVAILABLE
+
+If logging fails:
+
+Status:
+LOGGING ERROR
+
+The machine should continue operating according to the configured SD failure strategy.
+
+10. SYSTEM STATUS
+
+Provide a diagnostic screen for development and maintenance.
+
+Display:
+
+ESP32 status
+Free heap
+Minimum free heap
+PSRAM
+CPU usage if implemented
+LVGL status
+RTC status
+SD status
+ADS1115 status
+RS485 status
+Relay status
+Upper sensor status
+Lower sensor status
+Moisture sensor status
+
+This screen is intended for maintenance and debugging.
+
+HMI STATE MODEL
+
+Do not allow LVGL screens to directly read hardware drivers.
+
+Create an HMI state structure.
+
+Example:
+
+hmi_state_t
+
+Contains:
+
+current_datetime
+rtc_valid
+
+machine_state
+operating_mode
+
+upper_temperature
+upper_humidity
+
+lower_temperature
+lower_humidity
+
+temperature_difference
+
+moisture_raw
+moisture_filtered
+target_moisture
+
+temperature_setpoint
+
+heater_state
+fan_state
+elevator_state
+discharge_state
+
+drying_elapsed_time
+
+heater_runtime
+fan_runtime
+elevator_runtime
+discharge_runtime
+
+session_id
+
+active_faults
+
+sd_card_status
+sd_free_space
+
+rtc_status
+
+The HMI reads this state.
+
+The HMI sends commands through a separate command interface.
+
+HMI COMMAND MODEL
+
+Create an explicit command model.
+
+Example:
+
+HMI_CMD_START_DRYING
+HMI_CMD_STOP_DRYING
+HMI_CMD_EMERGENCY_STOP
+
+HMI_CMD_ELEVATOR_ON
+HMI_CMD_ELEVATOR_OFF
+
+HMI_CMD_FAN_ON
+HMI_CMD_FAN_OFF
+
+HMI_CMD_HEATER_ON
+HMI_CMD_HEATER_OFF
+
+HMI_CMD_DISCHARGE_ON
+HMI_CMD_DISCHARGE_OFF
+
+HMI_CMD_SET_TEMPERATURE
+HMI_CMD_SET_TARGET_MOISTURE
+
+HMI_CMD_SET_RTC
+
+HMI_CMD_SAVE_SETTINGS
+
+The machine controller validates every command.
+
+UI NAVIGATION
+
+Use a central screen manager.
+
+Suggested abstraction:
+
+hmi_show_home()
+hmi_show_drying()
+hmi_show_manual()
+hmi_show_settings()
+hmi_show_calibration()
+hmi_show_alarms()
+hmi_show_history()
+hmi_show_rtc()
+hmi_show_system()
+
+Avoid creating and destroying screens unnecessarily.
+
+Where practical, create screens once and update their contents.
+
+Use LVGL screen loading/navigation mechanisms.
+
+Do not leak LVGL objects when changing screens.
+
+LVGL MEMORY MANAGEMENT
+
+ESP32-S3 PSRAM should be used where appropriate.
+
+Do not blindly allocate large buffers from internal RAM.
+
+Identify:
+
+* LVGL draw buffers
+* Display frame buffers
+* Image assets
+* Font data
+* History buffers
+* CSV parsing buffers
+
+Measure heap usage.
+
+Avoid unnecessary dynamic allocation during normal machine operation.
+
+Do not continuously allocate/free LVGL objects during the drying process.
+
+Create UI objects during screen initialization and update them.
+
+LVGL THREAD SAFETY
+
+Only the LVGL task should manipulate LVGL objects.
+
+If another FreeRTOS task needs to request a UI action, send a command/event to the LVGL task.
+
+Example:
+
+machine_controller
+↓
+HMI state update
+↓
+LVGL task
+↓
+lv_label_set_text()
+
+Never perform:
+
+lv_label_set_text()
+
+from a sensor task.
+
+Never manipulate LVGL objects from the safety task.
+
+Never manipulate LVGL objects from the data logger task.
+
+TOUCH INTERACTION
+
+Use the Waveshare touch controller supported by the actual hardware.
+
+Support:
+
+* Touch input
+* Button press
+* Button release
+* Slider
+* Numeric input
+* Keyboard where required
+
+Avoid tiny touch targets.
+
+Use appropriate touch target sizes for a machine HMI.
+
+The interface should remain usable while wearing work gloves where practical.
+
+MACHINE STATUS VISUALIZATION
+
+Use consistent status indicators.
+
+For each actuator:
+
+OFF
+ON
+FAULT
+INTERLOCKED
+
+Do not rely exclusively on color.
+
+Example:
+
+HEATER
+● ON
+
+FAN
+● ON
+
+ELEVATOR
+● OFF
+
+DISCHARGE
+● INTERLOCKED
+
+The actual state must come from the machine controller.
+
+UI SAFETY
+
+The HMI must not bypass machine safety.
+
+For example:
+
+If the heater is requested ON but a temperature sensor has failed:
+
+HMI:
+
+HEATER
+REQUESTED ON
+
+ACTUAL:
+OFF
+
+REASON:
+TEMPERATURE SENSOR FAULT
+
+The HMI must communicate the reason to the operator.
+
+EMERGENCY STOP
+
+Provide an emergency stop interface if the hardware includes a physical emergency-stop circuit.
+
+Do not rely solely on an LVGL button as the machine's physical emergency stop.
+
+The physical safety circuit should have authority over machine outputs.
+
+If an emergency stop input exists:
+
+Emergency stop active
+↓
+Safety Manager
+↓
+Actuators OFF
+
+The HMI displays:
+
+EMERGENCY STOP ACTIVE
+
+DATA FLOW
+
+Use this overall architecture:
+
+```
+             ┌────────────────────┐
+             │      LVGL HMI      │
+             │                    │
+             │ Touchscreen        │
+             │ Screens            │
+             │ Widgets            │
+             └─────────┬──────────┘
+                       │
+                HMI Command Queue
+                       │
+                       ▼
+             ┌────────────────────┐
+             │ Machine Controller │
+             └─────────┬──────────┘
+                       │
+                 Safety Manager
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+      Sensors       Actuators     Storage
+          │            │            │
+    Temp/RH/ADC   Relay/SSR     SD/NVS/RTC
+```
+
+Machine status flows upward:
+
+Sensors
+↓
+Sensor Manager
+↓
+Machine Status
+↓
+HMI State
+↓
+LVGL
+
+Commands flow downward:
+
+LVGL
+↓
+HMI Command
+↓
+Machine Controller
+↓
+Safety Manager
+↓
+Actuator Manager
+↓
+Relay/SSR/Motor
+
+RTC flows to:
+
+RTC
+↓
+Time Manager
+├── HMI clock
+├── SD logger
+├── Drying history
+└── Fault timestamps
+
+MONITORING VS CONTROL
+
+The HMI must clearly distinguish:
+
+Measured values
+Setpoints
+Requested states
+Actual states
+Fault states
+
+Example:
+
+Temperature:
+48.2 °C
+
+Setpoint:
+50.0 °C
+
+Heater:
+REQUESTED ON
+
+Heater:
+ACTUAL ON
+
+This prevents confusion between operator commands and actual machine behavior.
+
+LVGL DEVELOPMENT PHASE
+
+Add a dedicated HMI development phase after the hardware drivers and machine state model are working.
+
+Recommended sequence:
+
+1. LVGL initialization
+2. Display driver
+3. Touch driver
+4. LVGL task
+5. Theme
+6. Navigation
+7. Home screen
+8. Sensor widgets
+9. Drying screen
+10. Manual control
+11. Settings
+12. RTC screen
+13. Calibration
+14. Alarms
+15. Drying history
+16. System diagnostics
+17. Final UI optimization
+
+Do not implement the entire UI before the machine state model exists.
+
+The HMI should consume the machine state model rather than becoming the source of machine logic.
+
+FINAL UI REQUIREMENT
+
+The final HMI should feel like an industrial machine control panel.
+
+Prioritize:
+
+* Large readable values
+* Simple navigation
+* Clear machine states
+* Clear alarms
+* Large touch targets
+* Minimal unnecessary animation
+* Stable screen updates
+* Clear actuator status
+* Easy manual control
+* Easy drying setup
+* Easy historical data viewing
+* Offline RTC time
+* SD card status
+
+Avoid unnecessary UI animations that increase CPU or memory usage.
+
+The machine must remain responsive even while LVGL is updating the display, reading history, or showing drying data.

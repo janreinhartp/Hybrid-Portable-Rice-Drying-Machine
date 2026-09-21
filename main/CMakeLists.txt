@@ -1,0 +1,15 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "board/board_port.c"
+        "board/touch_input.c"
+        "hmi/hmi_command.c"
+        "hmi/hmi_state.c"
+        "hmi/screen_manager.c"
+        "machine/machine_controller.c"
+    INCLUDE_DIRS
+        "."
+        "board"
+        "hmi"
+        "machine"
+)
