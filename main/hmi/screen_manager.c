@@ -1,5 +1,6 @@
 #include "screen_manager.h"
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
@@ -15,6 +16,12 @@ typedef enum {
     SCREEN_HOME = 0,
     SCREEN_DRYING,
     SCREEN_MANUAL,
+    SCREEN_SETTINGS,
+    SCREEN_CALIBRATION,
+    SCREEN_RTC,
+    SCREEN_ALARMS,
+    SCREEN_HISTORY,
+    SCREEN_DIAGNOSTICS,
     SCREEN_COUNT,
 } screen_id_t;
 
@@ -32,6 +39,12 @@ static lv_obj_t *screens[SCREEN_COUNT];
 static home_screen_t home_screen;
 static lv_obj_t *drying_details;
 static lv_obj_t *manual_details;
+static lv_obj_t *settings_details;
+static lv_obj_t *calibration_details;
+static lv_obj_t *rtc_details;
+static lv_obj_t *alarms_details;
+static lv_obj_t *history_details;
+static lv_obj_t *diagnostics_details;
 
 static const char *actuator_text(hmi_actuator_state_t state)
 {
@@ -91,14 +104,16 @@ static void show_screen_event(lv_event_t *event)
 
 static void add_navigation(lv_obj_t *screen)
 {
-    const char *names[] = {"HOME", "DRYING", "MANUAL"};
+    const char *names[] = {"HOME", "DRYING", "MANUAL", "SETTINGS", "CAL", "RTC", "ALARMS", "HISTORY", "DIAG"};
     for (screen_id_t screen_id = SCREEN_HOME; screen_id < SCREEN_COUNT; screen_id++) {
         lv_obj_t *button = lv_btn_create(screen);
-        lv_obj_set_size(button, 150, 42);
-        lv_obj_set_pos(button, 24 + (lv_coord_t)screen_id * 165, 535);
+        lv_obj_set_size(button, 120, 36);
+        lv_obj_set_pos(button,
+                      18 + (lv_coord_t)((screen_id % 3) * 150),
+                      505 + (lv_coord_t)((screen_id / 3) * 42));
         lv_obj_add_event_cb(button, show_screen_event, LV_EVENT_CLICKED,
                             (void *)(uintptr_t)screen_id);
-        create_label(button, names[screen_id], 20, 10);
+        create_label(button, names[screen_id], 20, 8);
     }
 }
 
@@ -185,11 +200,39 @@ static void update_home_screen(lv_timer_t *timer)
     lv_label_set_text(home_screen.storage, storage_text);
 }
 
+static void save_settings_event(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    hmi_command_t command = {
+        .type = HMI_COMMAND_SAVE_SETTINGS,
+        .payload.settings = {
+            .temperature_setpoint_c = 50.0f,
+            .maximum_temperature_c = 70.0f,
+            .temperature_hysteresis_c = 2.0f,
+            .target_moisture_percent = 14.0f,
+            .moisture_confirmation_seconds = 30,
+            .drying_timeout_seconds = 3600,
+            .discharge_seconds = 30,
+            .logging_interval_seconds = 10,
+        },
+    };
+    (void)hmi_command_send(&command, 0);
+}
+
 static void update_other_screens(lv_timer_t *timer)
 {
     hmi_state_t state;
     char drying_text[192];
     char manual_text[256];
+    char settings_text[256];
+    char calibration_text[128];
+    char rtc_text[128];
+    char alarms_text[128];
+    char history_text[128];
+    char diagnostics_text[128];
     (void)timer;
 
     if (hmi_state_read(&state) != ESP_OK) {
@@ -209,8 +252,41 @@ static void update_other_screens(lv_timer_t *timer)
              actuator_text(state.fan.requested), actuator_text(state.fan.actual),
              actuator_text(state.elevator.requested), actuator_text(state.elevator.actual),
              actuator_text(state.discharge.requested), actuator_text(state.discharge.actual));
+    snprintf(settings_text, sizeof(settings_text),
+             "SETTINGS\n\nSETPOINT: %.1f C\nMAX TEMP: %.1f C\nHYSTERESIS: %.1f C\nTARGET MOISTURE: %.1f %%\nMOISTURE CONFIRM: %" PRIu32 " s\nDRYING TIMEOUT: %" PRIu32 " s\nDISCHARGE: %" PRIu32 " s\nLOGGING: %" PRIu32 " s",
+             state.temperature_setpoint_c, state.maximum_temperature_c,
+             state.temperature_hysteresis_c, state.target_moisture_percent,
+             state.moisture_confirmation_seconds,
+             state.drying_timeout_seconds, state.discharge_seconds,
+             state.logging_interval_seconds);
+    snprintf(calibration_text, sizeof(calibration_text),
+             "CALIBRATION\nSENSOR: %.1f %% @ %.2f V\nPOINTS: %zu",
+             state.moisture_filtered, 1.50f, (size_t)0U);
+    snprintf(rtc_text, sizeof(rtc_text),
+             "RTC\nVALID: %s\nTIME: %s",
+             state.rtc_valid ? "YES" : "NO",
+             state.rtc_valid ? "SET" : "INVALID");
+    snprintf(alarms_text, sizeof(alarms_text),
+             "ALARMS\nACTIVE: %zu\nCRITICAL: %s",
+             (size_t)state.active_fault_count,
+             (state.active_fault_count > 0) ? "YES" : "NO");
+    snprintf(history_text, sizeof(history_text),
+             "HISTORY\nSESSION: %s\nELAPSED: %lu s",
+             state.session_id[0] == '\0' ? "NONE" : state.session_id,
+             (unsigned long)state.drying_elapsed_seconds);
+    snprintf(diagnostics_text, sizeof(diagnostics_text),
+             "DIAGNOSTICS\nSD: %s\nPSRAM: %s\nHEAP: %lu",
+             state.sd_available ? "READY" : "NOT AVAILABLE",
+             "OK",
+             (unsigned long)0UL);
     lv_label_set_text(drying_details, drying_text);
     lv_label_set_text(manual_details, manual_text);
+    lv_label_set_text(settings_details, settings_text);
+    lv_label_set_text(calibration_details, calibration_text);
+    lv_label_set_text(rtc_details, rtc_text);
+    lv_label_set_text(alarms_details, alarms_text);
+    lv_label_set_text(history_details, history_text);
+    lv_label_set_text(diagnostics_details, diagnostics_text);
 }
 
 esp_err_t screen_manager_init(void)
@@ -218,7 +294,15 @@ esp_err_t screen_manager_init(void)
     screens[SCREEN_HOME] = lv_obj_create(NULL);
     screens[SCREEN_DRYING] = lv_obj_create(NULL);
     screens[SCREEN_MANUAL] = lv_obj_create(NULL);
-    if (screens[SCREEN_HOME] == NULL || screens[SCREEN_DRYING] == NULL || screens[SCREEN_MANUAL] == NULL) {
+    screens[SCREEN_SETTINGS] = lv_obj_create(NULL);
+    screens[SCREEN_CALIBRATION] = lv_obj_create(NULL);
+    screens[SCREEN_RTC] = lv_obj_create(NULL);
+    screens[SCREEN_ALARMS] = lv_obj_create(NULL);
+    screens[SCREEN_HISTORY] = lv_obj_create(NULL);
+    screens[SCREEN_DIAGNOSTICS] = lv_obj_create(NULL);
+    if (screens[SCREEN_HOME] == NULL || screens[SCREEN_DRYING] == NULL || screens[SCREEN_MANUAL] == NULL || screens[SCREEN_SETTINGS] == NULL ||
+        screens[SCREEN_CALIBRATION] == NULL || screens[SCREEN_RTC] == NULL || screens[SCREEN_ALARMS] == NULL || screens[SCREEN_HISTORY] == NULL ||
+        screens[SCREEN_DIAGNOSTICS] == NULL) {
         return ESP_ERR_NO_MEM;
     }
 
@@ -243,10 +327,24 @@ esp_err_t screen_manager_init(void)
     add_manual_control(screens[SCREEN_MANUAL], HMI_ACTUATOR_DISCHARGE, "DISCHARGE", 320);
     manual_details = create_label(screens[SCREEN_MANUAL], "MANUAL CONTROL", 40, 410);
 
+    lv_obj_t *settings_save_button = lv_btn_create(screens[SCREEN_SETTINGS]);
+    settings_details = create_label(screens[SCREEN_SETTINGS], "SETTINGS", 40, 30);
+    calibration_details = create_label(screens[SCREEN_CALIBRATION], "CALIBRATION", 40, 30);
+    rtc_details = create_label(screens[SCREEN_RTC], "RTC", 40, 30);
+    alarms_details = create_label(screens[SCREEN_ALARMS], "ALARMS", 40, 30);
+    history_details = create_label(screens[SCREEN_HISTORY], "HISTORY", 40, 30);
+    diagnostics_details = create_label(screens[SCREEN_DIAGNOSTICS], "DIAGNOSTICS", 40, 30);
+    lv_obj_set_size(settings_save_button, 220, 50);
+    lv_obj_set_pos(settings_save_button, 40, 470);
+    lv_obj_add_event_cb(settings_save_button, save_settings_event, LV_EVENT_CLICKED, NULL);
+    create_label(settings_save_button, "SAVE SETTINGS", 35, 12);
+
     if (title == NULL || home_screen.clock == NULL || home_screen.machine_state == NULL ||
         home_screen.upper_conditions == NULL || home_screen.lower_conditions == NULL ||
         home_screen.moisture == NULL || home_screen.actuators == NULL || home_screen.storage == NULL ||
-        drying_details == NULL || manual_details == NULL) {
+        drying_details == NULL || manual_details == NULL || settings_details == NULL ||
+        calibration_details == NULL || rtc_details == NULL || alarms_details == NULL ||
+        history_details == NULL || diagnostics_details == NULL || settings_save_button == NULL) {
         return ESP_ERR_NO_MEM;
     }
 

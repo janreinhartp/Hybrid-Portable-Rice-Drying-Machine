@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "hmi_settings.h"
 #include "hmi_state.h"
 
 static const char *TAG = "machine_controller";
@@ -126,6 +127,20 @@ esp_err_t machine_controller_process(const hmi_command_t *command)
 
         status->actual = HMI_ACTUATOR_OFF;
         strlcpy(status->reason, "OFF BY CONTROLLER", sizeof(status->reason));
+        return hmi_state_publish(&state);
+    }
+
+    if (command->type == HMI_COMMAND_SAVE_SETTINGS) {
+        char validation_error[128] = {0};
+        if (!hmi_settings_validate(&command->payload.settings, validation_error, sizeof(validation_error))) {
+            ESP_LOGW(TAG, "Rejected settings: %s", validation_error);
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        if (hmi_settings_apply(&state, &command->payload.settings) != ESP_OK) {
+            return ESP_ERR_INVALID_STATE;
+        }
+
         return hmi_state_publish(&state);
     }
 

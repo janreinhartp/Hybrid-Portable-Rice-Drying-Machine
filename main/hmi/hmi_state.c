@@ -18,6 +18,15 @@ esp_err_t hmi_state_init(void)
     memset(&current_state, 0, sizeof(current_state));
     current_state.machine_state = HMI_MACHINE_IDLE;
     current_state.sd_available = false;
+    current_state.temperature_setpoint_c = 50.0f;
+    current_state.maximum_temperature_c = 70.0f;
+    current_state.temperature_hysteresis_c = 2.0f;
+    current_state.target_moisture_percent = 14.0f;
+    current_state.moisture_filtered = 18.0f;
+    current_state.moisture_confirmation_seconds = 30;
+    current_state.drying_timeout_seconds = 3600;
+    current_state.discharge_seconds = 30;
+    current_state.logging_interval_seconds = 10;
     return ESP_OK;
 }
 

@@ -76,6 +76,12 @@ typedef struct {
     float moisture_filtered;
     float target_moisture_percent;
     float temperature_setpoint_c;
+    float maximum_temperature_c;
+    float temperature_hysteresis_c;
+    uint32_t moisture_confirmation_seconds;
+    uint32_t drying_timeout_seconds;
+    uint32_t discharge_seconds;
+    uint32_t logging_interval_seconds;
     hmi_actuator_status_t elevator;
     hmi_actuator_status_t fan;
     hmi_actuator_status_t heater;

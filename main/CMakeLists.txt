@@ -5,6 +5,12 @@ idf_component_register(
         "board/touch_input.c"
         "hmi/hmi_command.c"
         "hmi/hmi_state.c"
+        "hmi/hmi_settings.c"
+        "hmi/hmi_calibration.c"
+        "hmi/hmi_rtc.c"
+        "hmi/hmi_faults.c"
+        "hmi/hmi_history.c"
+        "hmi/hmi_diagnostics.c"
         "hmi/screen_manager.c"
         "machine/machine_controller.c"
     INCLUDE_DIRS

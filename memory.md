@@ -2,144 +2,119 @@
 
 ## Project boundary
 
-- The ESP-IDF project is at the repository root.
-- `Documentation/Prompt.txt` is the implementation requirement source.
-- `Documentation/16_LVGL_UI` is read-only reference material. It is not copied, linked, modified, or included in the root build.
-
-## Completed
-
-### Phase 0: Project scaffold
-
-- Created the root ESP-IDF project with `CMakeLists.txt`, `main/`, `sdkconfig.defaults`, and `partitions.csv`.
-- Added independent source boundaries:
-  - `main/board`: board and LVGL ownership boundary
-  - `main/hmi`: state, commands, navigation, and screens
-  - `main/machine`: controller and safety-facing logic
-  - `main/storage`: reserved for NVS, SD, logging, calibration, and history
+- The ESP-IDF project is rooted at the repository root.
+- The implementation targets the requirements in [Documentation/Prompt.txt](Documentation/Prompt.txt).
+- The material in [Documentation/16_LVGL_UI](Documentation/16_LVGL_UI) is reference-only and is not copied into the build.
+- The code is organized around the architecture requested by the prompt:
+  - `main/board`: display, LVGL runtime, and touch boundary
+  - `main/hmi`: HMI state, commands, settings, calibration, RTC, fault, history, diagnostics, and screen manager
+  - `main/machine`: controller and safety-facing state logic
+  - `main/storage`: reserved for persistent storage and future RTC/SD work
   - `main/diagnostics`: reserved for health and resource reporting
-- Added the LVGL 8.x managed component dependency.
 
-### Phase 1: Build configuration
+## Verified implementation facts
 
-- Standardized on ESP-IDF 5.5.4.
-- Target is `esp32s3`.
-- Configured 16 MB flash and the custom 3 MB factory partition in `partitions.csv`.
-- Configured PSRAM and 16-bit LVGL color depth.
-- Installed the required ESP-IDF Python environment and build tools locally.
-- Verified the project builds and links with the ESP32-S3 toolchain.
+### Hardware wiring reference
 
-Build environment used:
+- The project currently includes a design-level wiring concept for the system architecture, but the exact final pin mapping should be confirmed with the Waveshare board schematic and the physical electronics revision before use in production.
+- The conceptual connection strategy is intended to document the logical device map: MCU to LCD, touch controller, RTC, SD, sensors, actuator drivers, and safety interlocks.
+- The actual implementation remains safety-interlocked and does not claim real hardware output until the final board wiring and actuator drivers are validated.
 
-```powershell
-$env:Path = 'C:\Espressif\tools\cmake\3.30.2\bin;C:\Espressif\tools\ninja\1.12.1;C:\Espressif\tools\xtensa-esp-elf\esp-14.2.0_20260121\xtensa-esp-elf\bin;' + $env:Path
-$env:ESP_ROM_ELF_DIR = 'C:\Espressif\tools\esp-rom-elfs\20241011'
-& 'C:\Users\janre\.espressif\python_env\idf5.5_py3.13_env\Scripts\python.exe' 'C:\esp\v5.5.4\esp-idf\tools\idf.py' build
-```
+### Build status
 
-Latest build result:
+- Verified build command: `idf.py build`
+- Result: successful build in the current workspace
+- Generated binary: `build/rice_dryer_hmi.bin`
+- Evidence from the terminal: “Project build complete.”
 
-- ESP-IDF: 5.5.4
+### Platform and runtime
+
+- ESP-IDF version: 5.5.4
 - Target: ESP32-S3
-- LVGL: 8.4.0
-- Firmware image: 262,512 bytes
-- Factory app partition: 3 MB
-- App partition free: 92%
-- The project has not been flashed to hardware yet.
+- LVGL version: 8.4.0 via managed component
+- Display: 1024x600 RGB565
+- Touch controller: GT911 on the Waveshare board path
+- PSRAM: enabled for LVGL framebuffers
 
-### Phase 2: HMI and controller contracts
+## Current requirement coverage
 
-- Added `hmi_state_t` with machine state, sensor values, actuator requested/actual state, runtimes, session ID, faults, RTC, and SD fields.
-- Added a mutex-protected HMI state snapshot API.
-- Added an HMI command queue for drying, actuator, settings, RTC, and calibration commands.
-- Added a machine-controller FreeRTOS task that consumes commands.
-- Emergency-stop commands force all actuator states off and set the machine state to emergency stop.
-- Actuator-on requests remain explicitly `INTERLOCKED` because no physical actuator driver or safety service is connected yet.
-- Actuator-off requests publish an explicit controller-owned off state.
-- No UI code directly calls GPIO, relay, Modbus, sensor, or storage code.
+### Requirement: LVGL-based HMI separated from machine control
 
-### Phase 3: Board and LVGL display runtime
+Status: implemented.
 
-- Implemented an independent RGB LCD port under `main/board/board_port.c`.
-- Configured the verified reference display facts: 1024x600 RGB565, 30.85 MHz pixel clock, 16-bit RGB bus, and the Waveshare GPIO map.
-- Allocated two RGB framebuffers in PSRAM.
-- Added the LVGL display flush callback and framebuffer registration.
-- Added the LVGL 2 ms tick timer and dedicated LVGL task.
-- Added recursive LVGL locking APIs and used the lock during screen creation.
-- The display runtime builds successfully; it has not yet been flashed to hardware.
+- The UI runtime is isolated in the board and HMI layers.
+- Machine logic lives behind the controller boundary and is not directly controlled from LVGL code.
+- HMI state is shared through a clear state contract rather than direct hardware calls.
 
-### Phase 4: First HMI screen
+### Requirement: Home, Drying, and Manual screens
 
-- Replaced the placeholder label with a Home screen driven only by `hmi_state_t`.
-- Added 250 ms LVGL-owned refreshes for RTC validity, machine state, upper/lower chamber values, moisture target, actual actuator states, and SD availability.
-- Added safe label-allocation handling.
-- Latest image after the Home screen: 454,544 bytes, with 86% of the 3 MB factory app partition free.
+Status: implemented in the current screen manager.
 
-### Phase 5: Touch and navigation runtime
+- Home, Drying, and Manual screens are part of the active navigation flow.
+- The shared HMI state is refreshed at a regular interval for the current screen content.
+- Manual actuator commands are routed through HMI commands instead of direct GPIO/relay calls.
 
-- Implemented an independent GT911 I2C input path under `main/board/touch_input.c`.
-- Configured the GT911 address at `0x5D`, I2C on GPIO8/GPIO9, and touch interrupt input on GPIO4.
-- Added LVGL pointer input registration with coordinate clamping to 1024x600.
-- Added a central LVGL screen manager with Home, Drying, and Manual screens.
-- Added navigation buttons between the three screens.
-- Added Manual ON/OFF controls that send `HMI_COMMAND_SET_ACTUATOR` commands through the HMI queue.
-- The complete display, touch, navigation, and controller path builds successfully.
-- Latest image: 487,424 bytes, with 85% of the 3 MB factory app partition free.
+### Requirement: Settings, calibration, RTC, alarms, history, diagnostics models
 
-## Current limitations
+Status: implemented at the data-model and logic level.
 
-- Physical validation is still required for RGB timing, GT911 address/orientation, and touch coordinates.
-- Backlight control and board reset handling are not implemented yet.
-- Settings, Calibration, RTC, Alarms, History, SD Status, and System Diagnostics screens are not implemented yet.
-- Sensor, actuator, safety, RTC, SD, NVS, calibration, history, and diagnostics implementations are not connected.
-- The controller intentionally refuses to claim successful actuator-on operations.
-- No hardware flash, monitor session, touch verification, or runtime memory measurement has been completed.
+- Settings validation and defaults are implemented in [main/hmi/hmi_settings.c](main/hmi/hmi_settings.c).
+- Calibration point storage and interpolation are implemented in [main/hmi/hmi_calibration.c](main/hmi/hmi_calibration.c).
+- RTC validation and state application helpers are implemented in [main/hmi/hmi_rtc.c](main/hmi/hmi_rtc.c).
+- Fault tracking and active alarm handling are implemented in [main/hmi/hmi_faults.c](main/hmi/hmi_faults.c).
+- Bounded drying history storage exists in [main/hmi/hmi_history.c](main/hmi/hmi_history.c).
+- Diagnostics summary generation exists in [main/hmi/hmi_diagnostics.c](main/hmi/hmi_diagnostics.c).
+- These modules are registered in [main/CMakeLists.txt](main/CMakeLists.txt).
 
-## Next phases
+### Requirement: full LVGL screen workflows for the remaining prompt sections
 
-### Phase 6: Hardware validation and board polish
+Status: still pending as completed UI screens.
 
-1. Verify the Waveshare ESP32-S3-Touch-LCD-7B schematic for RGB timing, GPIO mapping, GT911 pins/address, orientation, backlight, and I2C details.
-2. Flash the current firmware and verify display output, touch press/release, and coordinate orientation.
-3. Add backlight and board reset handling after hardware verification.
-4. Add a physical emergency-stop input boundary before enabling real actuator outputs.
+- The underlying logic modules exist, but the prompt’s dedicated Settings, Calibration, RTC, Alarm, History, and Diagnostics screens are not yet fully implemented as end-to-end LVGL interactions.
+- The project has a working architecture and contract layer, but the remaining screens still represent the next phase of UI work.
 
-### Phase 7: HMI foundation
+### Requirement: real hardware integration
 
-1. Add the central screen manager and shared industrial theme.
-2. Add reusable status, sensor, actuator, alarm, moisture, and runtime widgets.
-3. Implement the Home screen from `hmi_state_t` only.
-4. Add the 100-250 ms UI refresh mechanism owned by the LVGL task.
-5. Verify that non-LVGL tasks never manipulate LVGL objects.
+Status: intentionally blocked until the board is validated.
 
-### Phase 8: Machine services
+- Real sensors, relays, SSRs, RTC persistence, SD logging, and board-level safety wiring are not connected yet.
+- The machine controller intentionally keeps actuator output claims interlocked until actual driver validation is available.
 
-1. Add sensor manager interfaces and validated sensor fault states.
-2. Add actuator manager interfaces behind the controller and safety manager.
-3. Add emergency-stop input handling with physical safety authority.
-4. Add settings validation and NVS persistence.
-5. Add RTC read/set/verify behavior and timestamp propagation.
-6. Add SD logging, bounded history queries, calibration storage, and failure strategy.
+## Current project status
 
-### Phase 9: Remaining screens
+### Completed
 
-Implement in this order:
+- Project scaffold and source partitioning
+- ESP-IDF + LVGL display/touch runtime
+- HMI command/state model
+- Machine controller boundary
+- Settings and validation support
+- Calibration contract and interpolation support
+- RTC validation support
+- Fault model and warning/critical handling
+- History storage support
+- Diagnostics summary support
+- Home/Drying/Manual screen flow
+- Successful project build verification
 
-1. Drying
-2. Manual Control
-3. Settings
-4. Moisture Calibration
-5. RTC
-6. Alarms
-7. Drying History
-8. SD Card Status
-9. System Diagnostics
+### Still pending
 
-Each screen must consume HMI state and send HMI commands. It must not own machine logic or access concrete hardware drivers.
+- Full dedicated LVGL screens for Settings, Calibration, RTC, Alarms, History, and Diagnostics
+- Physical board validation on the actual Waveshare ESP32-S3 panel
+- Real I/O wiring for sensors, storage, and actuator controllers
+- RTC/NVS/SD persistence and real event logging
+- Safety integration and actuator enablement on hardware
 
-### Phase 10: Verification and optimization
+## Recommended next implementation order
 
-- Add tests for settings bounds, command safety rejection, moisture progress edge cases, RTC validity, calibration persistence, alarm timestamps, and bounded history queries.
-- Build and flash with ESP-IDF 5.5.4.
-- Verify large touch targets, orientation, numeric input, navigation, alarms, requested-versus-actual states, and emergency-stop behavior.
-- Measure heap, PSRAM, task stacks, LVGL refresh behavior, and history browsing.
-- Re-run `idf.py size` after each substantial UI or driver phase.
+1. Build the remaining prompt-screen UI flows on top of the existing shared state contract
+2. Add calibration-screen persistence and user validation flows
+3. Add RTC-screen configuration and validation flow
+4. Add alarm/history/diagnostics LVGL screens
+5. Validate hardware behavior on the actual board
+6. Integrate real sensors and actuator drivers
+7. Confirm safety behavior and operational mode transitions on hardware
+
+## Final assessment
+
+The firmware has moved past the initial skeleton and now includes a verified buildable ESP-IDF + LVGL foundation with the requested HMI/controller separation and the core prompt-related data models. The remaining effort is primarily in completing the dedicated LVGL screen implementations and validating the system against the real hardware, not in reworking the project architecture.
