@@ -45,8 +45,8 @@ Result: build succeeded and produced `build/rice_dryer_hmi.bin`.
 
 ```mermaid
 flowchart LR
-    ESP32S3[ESP32-S3 MCU] --> LCD[Waveshare 7-inch RGB LCD\n1024x600\nPSRAM-backed LVGL panel]
-    ESP32S3 --> GT911[GT911 Touch Controller\nI2C]
+    ESP32S3[ESP32-S3 MCU] --> LCD["Waveshare 7-inch RGB LCD<br/>1024x600<br/>PSRAM-backed LVGL panel"]
+    ESP32S3 --> GT911["GT911 Touch Controller<br/>I2C"]
     ESP32S3 --> RTC[RTC Module / Timekeeping]
     ESP32S3 --> SD[SD Card / Logging Storage]
     ESP32S3 --> SENSORS[Temperature / Humidity / Moisture Sensors]
